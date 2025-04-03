@@ -1,4 +1,3 @@
-import { useTernaryDarkMode } from "usehooks-ts";
 import { NavLink } from "react-router-dom";
 import {
   TbChevronLeft,
@@ -44,7 +43,6 @@ const NavItem: FC<NavItemProps> = ({ icon, title, href, mini = false }) => {
 };
 
 export default function Sidebar() {
-  const { isDarkMode } = useTernaryDarkMode();
   const [mini, setMini] = useState(false);
 
   return (
@@ -91,7 +89,7 @@ export default function Sidebar() {
                 >
                   <RiAiGenerate2 size="20" />
                 </Button>
-                <span>Guido 101</span>
+                <h1 className="font-medium text-xl">Guido 101</h1>
               </div>
             )}
             <div
