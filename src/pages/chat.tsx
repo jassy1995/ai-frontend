@@ -1,30 +1,38 @@
-import React, { useRef, useState } from 'react';
-import ChatWindow from '@/components/chat/ChatWindow';
-import useGlobalStore from '@/store/global';
-import { useCreateChat } from '@/api/chats';
-import { useQueryClient } from '@tanstack/react-query';
-import { useIsomorphicLayoutEffect, useMount } from 'react-use';
-import { useToast } from '@/hooks/use-toast';
-import ChatSidebar from '@/components/core/chat/ChatSidebar';
-import ChatAIList from '@/components/core/chat/ChatAIList';
-import { useShallow } from 'zustand/react/shallow';
+import { useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useIsomorphicLayoutEffect, useMount } from "react-use";
+import { useShallow } from "zustand/react/shallow";
+
+import ChatWindow from "@/components/chat/ChatWindow";
+import useGlobalStore from "@/store/global";
+import { useToast } from "@/hooks/use-toast";
+import ChatSidebar from "@/components/chat/ChatSidebar";
+// import ChatAIList from "@/components/chat/ChatAIList";
+import { useCreateChat } from "@/api/chat";
 
 const ChatPageContent = () => {
   const toast = useToast();
   const qc = useQueryClient();
-  const query = useGlobalStore(useShallow((s) => s.data.query));
+  const query = useGlobalStore(useShallow((s: any) => s.data.query));
   const [id, setId] = useState(null);
   const triggered = useRef(false);
   const { mutateAsync: create } = useCreateChat();
 
-  const handleClick = (id) => {
+  const handleClick = (id: any) => {
     setId(id);
   };
 
   useIsomorphicLayoutEffect(() => {
-    document.scrollingElement.overflowY = 'hidden';
+    const scrollingElement = document.scrollingElement as HTMLElement | null;
+
+    if (scrollingElement) {
+      scrollingElement.style.overflowY = "hidden";
+    }
+
     return () => {
-      document.scrollingElement.overflowY = 'initial';
+      if (scrollingElement) {
+        scrollingElement.style.overflowY = "";
+      }
     };
   }, []);
 
@@ -32,11 +40,16 @@ const ChatPageContent = () => {
     if (query && !triggered.current) {
       triggered.current = true;
       try {
-        const res = await create(null);
+        const res = await create(null as any);
+
         handleClick(res.data.chat._id);
-        await qc.invalidateQueries({ queryKey: ['chats', 'all'] });
-      } catch (e) {
-        toast.error(e?.response?.data?.message ?? e?.message ?? 'Something went wrong, please try again');
+        await qc.invalidateQueries({ queryKey: ["chats", "all"] });
+      } catch (e: any) {
+        toast.error(
+          e?.response?.data?.message ??
+            e?.message ??
+            "Something went wrong, please try again",
+        );
       }
     }
   });
@@ -48,10 +61,14 @@ const ChatPageContent = () => {
       </div>
       <div className="container grid h-full grid-cols-[1fr] gap-6 overflow-y-hidden md:grid-cols-[360px_1fr]">
         <div className="mt-[70px] flex flex-col pt-[25px] md:h-[calc(100vh_-_100px)]">
-          <ChatAIList onClick={handleClick} selected={id} />
+          {/* <ChatAIList selected={id} onClick={handleClick} /> */}
         </div>
         <div className="flex h-[calc(100vh_-_100px)] flex-1 flex-col pt-6 md:mt-[70px]">
-          <ChatWindow onClick={handleClick} selected={id} onClose={() => setId(null)} />
+          <ChatWindow
+            selected={id}
+            onClick={handleClick}
+            onClose={() => setId(null)}
+          />
         </div>
       </div>
     </div>
