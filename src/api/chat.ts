@@ -2,6 +2,23 @@ import { useQuery } from "@tanstack/react-query";
 
 import http from "../helper/lib/http";
 
+// Utility to stringify objects that may contain circular references
+const safeJsonStringify = (value: unknown) => {
+  const seen = new WeakSet();
+
+  return JSON.stringify(value, (_key, val) => {
+    if (typeof val === "object" && val !== null) {
+      if (seen.has(val)) {
+        // Skip circular reference
+        return undefined;
+      }
+      seen.add(val);
+    }
+
+    return val;
+  });
+};
+
 export const useGetChatMessages = (chatId: string) => {
   return useQuery({
     queryKey: ["chats", chatId],
@@ -19,12 +36,14 @@ export function chatMessenger({
   userId,
   chatId,
   bot,
+  tool,
   onChunk,
 }: {
   message: string;
   userId: string;
   chatId: string;
   bot: string;
+  tool: string;
   onChunk?: (chunk: string, fullText: string) => void;
 }) {
   return new Promise<string>((resolve, _reject) => {
@@ -39,7 +58,13 @@ export function chatMessenger({
         Accept: "text/event-stream",
         "Cache-Control": "no-cache",
       },
-      body: JSON.stringify({ message, userId, chatId, bot }),
+      body: safeJsonStringify({
+        message,
+        userId,
+        chatId,
+        bot,
+        tool,
+      }),
     })
       .then((response) => {
         if (!response.ok) {
@@ -82,13 +107,18 @@ export function chatMessenger({
                   if (data.startsWith("[END]:")) {
                     const residual = data.slice(6);
 
-                    if (residual && !fullText.endsWith(residual)) {
-                      fullText += residual;
-                      if (onChunk) onChunk(residual, fullText);
+                    const residualText = residual === "" ? "\n\n" : residual;
+
+                    if (residualText && !fullText.includes(residualText)) {
+                      fullText += residualText;
+                      if (onChunk) onChunk(residualText, fullText);
                     }
                   } else {
-                    fullText += data;
-                    if (onChunk) onChunk(data, fullText);
+                    const chunkText = data === "" ? "\n\n" : data;
+
+                    fullText += chunkText;
+
+                    if (onChunk) onChunk(chunkText, fullText);
                   }
                 }
               }
