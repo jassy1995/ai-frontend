@@ -2,23 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 
 import http from "../helper/lib/http";
 
-// Utility to stringify objects that may contain circular references
-const safeJsonStringify = (value: unknown) => {
-  const seen = new WeakSet();
-
-  return JSON.stringify(value, (_key, val) => {
-    if (typeof val === "object" && val !== null) {
-      if (seen.has(val)) {
-        // Skip circular reference
-        return undefined;
-      }
-      seen.add(val);
-    }
-
-    return val;
-  });
-};
-
 export const useGetChatMessages = (chatId: string) => {
   return useQuery({
     queryKey: ["chats", chatId],
@@ -30,113 +13,66 @@ export const useGetChatMessages = (chatId: string) => {
     enabled: !!chatId,
   });
 };
+export interface StreamChatParams {
+  message: string;
+  userId: string;
+  chatId: string;
+  bot: string;
+  tool: "web_search" | "custom_function";
+}
 
-export function chatMessenger({
+export interface StreamChatData {
+  content?: string;
+  isError?: boolean;
+  isEnd?: boolean;
+}
+
+export async function* streamChat({
   message,
   userId,
   chatId,
   bot,
   tool,
-  onChunk,
-}: {
-  message: string;
-  userId: string;
-  chatId: string;
-  bot: string;
-  tool: string;
-  onChunk?: (chunk: string, fullText: string) => void;
-}) {
-  return new Promise<string>((resolve, _reject) => {
-    let fullText = "";
-    const url = `${import.meta.env.VITE_BASE_URL}/api/chats/messenger`;
-    const errorMsg = "The server is busy now! Try again later";
-
-    fetch(url, {
+}: StreamChatParams): AsyncGenerator<StreamChatData, void, unknown> {
+  const response = await fetch(
+    `${import.meta.env.VITE_BASE_URL}/api/chats/messenger`,
+    {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Accept: "text/event-stream",
         "Cache-Control": "no-cache",
       },
-      body: safeJsonStringify({
+      body: JSON.stringify({
         message,
         userId,
         chatId,
         bot,
         tool,
       }),
-    })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
+    }
+  );
 
-        const reader = response.body!.getReader();
-        const decoder = new TextDecoder();
+  if (!response.ok) throw new Error("Request failed");
+  if (!response.body) throw new Error("No response body");
 
-        function readStream() {
-          reader
-            .read()
-            .then(({ done, value }) => {
-              if (done) {
-                if (!fullText) {
-                  fullText = errorMsg;
-                  if (onChunk) onChunk(errorMsg, fullText);
-                }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
 
-                resolve(fullText);
+  while (true) {
+    const { done, value } = await reader.read();
 
-                return;
-              }
+    if (done) break;
 
-              const chunk = decoder.decode(value, { stream: true });
+    const chunk = decoder.decode(value, { stream: true });
+    const lines = chunk.split("\n\n").filter((line) => line?.trim());
 
-              const lines = chunk.split("\n");
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
 
-              for (const line of lines) {
-                if (line.startsWith("data: ")) {
-                  const data = line.slice(6); // Remove 'data: ' prefix
+      const data: StreamChatData = JSON.parse(line.replace("data: ", ""));
 
-                  if (data.startsWith("[ERROR]:")) {
-                    fullText = errorMsg;
-                    if (onChunk) onChunk(errorMsg, fullText);
-                    resolve(fullText);
-
-                    return;
-                  }
-                  if (data.startsWith("[END]:")) {
-                    const residual = data.slice(6);
-
-                    const residualText = residual === "" ? "\n\n" : residual;
-
-                    if (residualText && !fullText.includes(residualText)) {
-                      fullText += residualText;
-                      if (onChunk) onChunk(residualText, fullText);
-                    }
-                  } else {
-                    const chunkText = data === "" ? "\n\n" : data;
-
-                    fullText += chunkText;
-
-                    if (onChunk) onChunk(chunkText, fullText);
-                  }
-                }
-              }
-              readStream();
-            })
-            .catch((_e) => {
-              fullText = errorMsg;
-              if (onChunk) onChunk(errorMsg, fullText);
-              resolve(fullText);
-            });
-        }
-
-        readStream();
-      })
-      .catch((_e) => {
-        fullText = errorMsg;
-        if (onChunk) onChunk(errorMsg, fullText);
-        resolve(fullText);
-      });
-  });
+      yield data;
+    }
+  }
 }

@@ -1,4 +1,4 @@
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import Markdown from "react-markdown";
 import { Avatar, Button, Divider, Spinner, Textarea } from "@heroui/react";
 import {
@@ -17,7 +17,7 @@ import {
   DropdownItem,
 } from "@heroui/dropdown";
 
-import { chatMessenger, useGetChatMessages } from "@/api/chat";
+import { useGetChatMessages, streamChat } from "@/api/chat";
 
 const markdownComponents = {
   // eslint-disable-next-line react/no-unstable-nested-components
@@ -72,67 +72,94 @@ const StreamingChat = () => {
     isRecordingRef.current = isRecording;
   }, [isRecording]);
 
-  const handleSend = async (inputText?: string | any) => {
-    const textToSend = inputText ?? value;
+  const handleSend = useCallback(
+    async (inputText?: string) => {
+      const messageText = (inputText ?? value).trim();
 
-    if (!textToSend) return;
-    const userMessage = {
-      role: "user",
-      content: textToSend,
-      id: Date.now().toString(),
-    };
+      if (!messageText) return;
 
-    setMessages((prev: any) => [...prev, userMessage]);
+      if (inputText === undefined) setValue("");
 
-    const assistantMessage = {
-      role: "assistant",
-      content: "",
-      id: `temp-${Date.now()}`,
-      isStreaming: true,
-    };
+      const userMsgId = Date.now().toString();
+      const assistantMsgId = `temp-${userMsgId}`;
 
-    setMessages((prev: any) => [...prev, assistantMessage]);
-    setIsStreaming(true);
+      const userMessage = {
+        role: "user",
+        content: messageText,
+        id: userMsgId,
+      };
 
-    if (!inputText) {
-      setValue("");
-    }
-    const tool = webSearchEnabled ? "web_search" : "custom_function";
+      const assistantMessage = {
+        role: "assistant",
+        content: "",
+        id: assistantMsgId,
+        isStreaming: true,
+      };
 
-    try {
-      await chatMessenger({
-        message: textToSend,
-        userId,
-        chatId,
-        bot,
-        tool,
-        onChunk: (_chunk: any, fullText: any) => {
-          const isErrorMsg =
-            fullText === "The server is busy now! Try again later";
+      setMessages((prev: any) => [...prev, userMessage, assistantMessage]);
+      setIsStreaming(true);
 
-          setMessages((prev: any) => {
-            const newMessages = [...prev];
-            const assistantMsgIndex = newMessages.findIndex(
-              (m) => m.id === assistantMessage.id
+      const tool = webSearchEnabled ? "web_search" : "custom_function";
+
+      try {
+        let accumulatedContent = "";
+
+        for await (const data of streamChat({
+          message: messageText,
+          userId,
+          chatId,
+          bot,
+          tool,
+        })) {
+          if (data.content && !data.isError && !data.isEnd) {
+            accumulatedContent += data.content;
+            setMessages((prev: any) =>
+              prev.map((m: any) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      content: accumulatedContent,
+                      isStreaming: false,
+                    }
+                  : m
+              )
             );
-
-            if (assistantMsgIndex !== -1) {
-              newMessages[assistantMsgIndex] = {
-                ...newMessages[assistantMsgIndex],
-                content: fullText,
-                isStreaming: false,
-                isError: isErrorMsg,
-              };
-            }
-
-            return newMessages;
-          });
-        },
-      });
-    } finally {
-      setIsStreaming(false);
-    }
-  };
+          }
+          if (data.isError) {
+            setMessages((prev: any) =>
+              prev.map((m: any) =>
+                m.id === assistantMsgId
+                  ? {
+                      ...m,
+                      content:
+                        "Sorry, there was an error processing your message.",
+                      isError: true,
+                      isStreaming: false,
+                    }
+                  : m
+              )
+            );
+          }
+        }
+      } catch (_error: any) {
+        setMessages((prev: any) =>
+          prev.map((m: any) =>
+            m.id === assistantMsgId
+              ? {
+                  ...m,
+                  content: "Sorry, there was an error processing your message.",
+                  isError: true,
+                  isStreaming: false,
+                }
+              : m
+          )
+        );
+      } finally {
+        setIsStreaming(false);
+      }
+    },
+    [value, webSearchEnabled, userId, chatId, bot]
+  );
 
   const toggleRecording = () => {
     if (isRecording) {
@@ -219,7 +246,13 @@ const StreamingChat = () => {
         className="relative flex flex-1 flex-col overflow-y-auto"
       >
         <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col px-8 md:px-10">
-          {!!messages.length && (
+          {messages.length === 0 ? (
+            <div className="flex h-full w-full items-center justify-center py-6">
+              <p className="text-2xl text-slate-700 text-center">
+                How can I help you today?
+              </p>
+            </div>
+          ) : (
             <div className="flex w-full flex-col space-y-8 py-6">
               {messages.map((message: any) => (
                 <div key={message.id}>
@@ -278,7 +311,7 @@ const StreamingChat = () => {
       </div>
       <Divider className="opacity-60" />
       <div className="w-full py-4">
-        <div className="flex flex-col space-y-2 mx-auto w-full max-w-4xl p-4 border border-default-100 rounded-3xl">
+        <div className="flex flex-col space-y-2 mx-auto w-full max-w-4xl p-4 border border-default-200 rounded-3xl">
           <Textarea
             key="flat"
             disableAutosize
@@ -336,7 +369,11 @@ const StreamingChat = () => {
                     </span>
                   </Button>
                 </DropdownTrigger>
-                <DropdownMenu aria-label="Tools Menu" variant="flat">
+                <DropdownMenu
+                  aria-label="Tools Menu"
+                  className="pr-8 pt-3"
+                  variant="flat"
+                >
                   <DropdownItem key="search_web" className="w-full">
                     <div className="flex items-center space-x-5 justify-between w-full">
                       <div className="flex items-center space-x-2">
